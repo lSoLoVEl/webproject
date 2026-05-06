@@ -130,15 +130,22 @@ export default function HistoryPage() {
 
         // ================= หมวด 4: ไทม์ไลน์ =================
         // นำข้อมูลของช่วง 7 วันมาจัดเรียงจากล่าสุด
+       // ================= หมวด 4: ไทม์ไลน์ =================
+        // นำข้อมูลของช่วง 7 วันมาจัดเรียงจากล่าสุด
         const sortedTimeline = [...data]
           .sort((a, b) => new Date(b.Date).getTime() - new Date(a.Date).getTime())
-          .slice(0, 5) // เอามาแสดงแค่ 5 รายการล่าสุด
-          .map((item) => ({
-            id: item.waste_id.toString(),
-            vesselCode: item.Vessel?.vessel_code || "ไม่ระบุเรือ",
-            amount: item.amount || 0,
-            date: item.Date,
-          }));
+          .slice(0, 5) 
+          .map((item: any) => { // 1. เติม : any เพื่อแก้ปัญหา Type Error ตอน Build
+            // 2. ดักจับกรณีที่ Supabase คืนค่ามาเป็น Array หรือ Object
+            const vesselData = Array.isArray(item.Vessel) ? item.Vessel[0] : item.Vessel;
+            
+            return {
+              id: item.waste_id?.toString() || Math.random().toString(),
+              vesselCode: vesselData?.vessel_code || "ไม่ระบุเรือ",
+              amount: item.amount || 0,
+              date: item.Date,
+            };
+          });
         setTimeline(sortedTimeline);
 
       } catch (err) {
