@@ -2,7 +2,7 @@
 
 import { useEffect, useState, useRef } from "react";
 import { FaArrowLeft, FaCamera, FaSave } from "react-icons/fa";
-import DashboardShell from "@/app/components/DashboardShell"; // ปรับ path ให้ตรงกับโปรเจกต์คุณ
+import DashboardShell from "@/app/components/DashboardShell";
 import { supabase } from "@/lib/supabaseClient";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
@@ -74,7 +74,7 @@ export default function EditProfilePage() {
     fetchUserData();
   }, [router]);
 
-  // ฟังก์ชันอัปโหลดรูปภาพไปยัง Supabase Storage
+  // 🔥 1. ปรับปรุงฟังก์ชันอัปโหลดรูป ให้บันทึกลงตาราง Profile อัตโนมัติ!
   const handleImageUpload = async (event: React.ChangeEvent<HTMLInputElement>) => {
     try {
       setUploading(true);
@@ -84,23 +84,53 @@ export default function EditProfilePage() {
         throw new Error("กรุณาเลือกรูปภาพ");
       }
 
+      if (!userId) {
+        throw new Error("ไม่พบข้อมูลผู้ใช้");
+      }
+
       const file = event.target.files[0];
       const fileExt = file.name.split(".").pop();
-      const fileName = `${userId}-${Math.random()}.${fileExt}`; // ตั้งชื่อไฟล์ใหม่ไม่ให้ซ้ำ
+      const fileName = `${userId}-${Math.random()}.${fileExt}`; 
       const filePath = `${fileName}`;
 
-      // อัปโหลดไฟล์ไปที่ Bucket ชื่อ 'avatars'
+      // 1. อัปโหลดไฟล์ไปที่ Bucket ชื่อ 'trash_bk'
       const { error: uploadError } = await supabase.storage
         .from("trash_bk")
         .upload(filePath, file);
 
       if (uploadError) throw uploadError;
 
-      // ดึง URL ที่เป็น Public เพื่อมาโชว์ที่หน้าจอ
-      const { data } = supabase.storage.from("avatars").getPublicUrl(filePath);
+      // 2. ดึง URL แบบ Public ออกมา
+      const { data } = supabase.storage.from("trash_bk").getPublicUrl(filePath);
+      const newProfilePicUrl = data.publicUrl;
       
-      setAvatarUrl(data.publicUrl);
-      setMessage({ text: "อัปโหลดรูปภาพสำเร็จ (อย่าลืมกดบันทึก)", type: "success" });
+      setAvatarUrl(newProfilePicUrl);
+
+      // 3. อัปเดต URL ลงในตาราง Profile ทันทีโดยไม่ต้องรอให้ผู้ใช้กดปุ่มเซฟ
+      const { data: existingProfile } = await supabase
+        .from("Profile")
+        .select("id")
+        .eq("user_id", userId)
+        .single();
+
+      if (existingProfile) {
+        // ถ้ามีข้อมูล Profile อยู่แล้วให้อัปเดต
+        await supabase
+          .from("Profile")
+          .update({ profile_picture: newProfilePicUrl })
+          .eq("user_id", userId);
+      } else {
+        // ถ้ายังไม่เคยมี ให้สร้างใหม่เลย
+        await supabase
+          .from("Profile")
+          .insert({ 
+            user_id: userId, 
+            profile_picture: newProfilePicUrl,
+            notification_status: false 
+          });
+      }
+
+      setMessage({ text: "เปลี่ยนรูปโปรไฟล์สำเร็จแล้ว!", type: "success" });
       
     } catch (error: any) {
       setMessage({ text: `อัปโหลดล้มเหลว: ${error.message}`, type: "error" });
@@ -109,14 +139,20 @@ export default function EditProfilePage() {
     }
   };
 
-  // ฟังก์ชันบันทึกข้อมูลทั้งหมด
+  // 🔥 2. ปรับปรุงการบันทึกข้อมูล (ไม่ต้องยุ่งกับรูปภาพแล้ว เพราะด้านบนจัดการให้แล้ว)
   const handleSaveProfile = async (e: React.FormEvent) => {
     e.preventDefault();
     setSaving(true);
     setMessage({ text: "", type: "" });
 
+    if (!userId) {
+      setMessage({ text: "ไม่พบข้อมูลผู้ใช้งาน กรุณาล็อกอินใหม่", type: "error" });
+      setSaving(false);
+      return;
+    }
+
     try {
-      // 1. เช็ครหัสผ่าน (ถ้ามีการกรอกรหัสผ่านใหม่)
+      // 1. เช็ครหัสผ่าน (ถ้ามีการพิมพ์รหัสผ่านใหม่)
       if (password) {
         if (password !== confirmPassword) {
           throw new Error("รหัสผ่านใหม่และการยืนยันรหัสผ่านไม่ตรงกัน");
@@ -125,7 +161,6 @@ export default function EditProfilePage() {
           throw new Error("รหัสผ่านต้องมีความยาวอย่างน้อย 6 ตัวอักษร");
         }
         
-        // อัปเดตรหัสผ่านผ่าน Supabase Auth
         const { error: authError } = await supabase.auth.updateUser({ password: password });
         if (authError) throw authError;
       }
@@ -138,28 +173,19 @@ export default function EditProfilePage() {
 
       if (userError) throw userError;
 
-      // 3. อัปเดตรูปภาพในตาราง Profile
-      // (ใช้ upsert เผื่อว่าบางคนเพิ่งเคยมี profile ครั้งแรก)
-      const { error: profileError } = await supabase
-        .from("Profile")
-        .upsert({ 
-          user_id: userId, 
-          profile_picture: avatarUrl 
-        }, { onConflict: 'user_id' });
-
-      if (profileError) throw profileError;
-
-      setMessage({ text: "บันทึกข้อมูลโปรไฟล์เรียบร้อยแล้ว!", type: "success" });
-      
-      // ล้างช่องรหัสผ่านหลังบันทึกเสร็จ
+      // แจ้งเตือนและรีเฟรชหน้าต่าง
+      setMessage({ text: "บันทึกข้อมูลสำเร็จ! กำลังรีเฟรชหน้าจอ...", type: "success" });
       setPassword("");
       setConfirmPassword("");
 
+      setTimeout(() => {
+        window.location.reload();
+      }, 1500);
+
     } catch (error: any) {
       setMessage({ text: error.message, type: "error" });
-    } finally {
       setSaving(false);
-    }
+    } 
   };
 
   if (loading) {
@@ -203,7 +229,7 @@ export default function EditProfilePage() {
                   </div>
                 )}
                 
-                {/* ปุ่มอัปโหลดรูปทับซ้อนอยู่บนรูปโปรไฟล์ */}
+                {/* ปุ่มอัปโหลดรูป */}
                 <button
                   type="button"
                   onClick={() => fileInputRef.current?.click()}
@@ -213,7 +239,6 @@ export default function EditProfilePage() {
                   <FaCamera size={16} />
                 </button>
                 
-                {/* Input ซ่อนไว้สำหรับเลือกไฟล์ */}
                 <input 
                   type="file" 
                   accept="image/*" 
@@ -222,10 +247,10 @@ export default function EditProfilePage() {
                   className="hidden" 
                 />
               </div>
-              {uploading && <p className="mt-3 text-sm text-sky-600 animate-pulse">กำลังอัปโหลดรูปภาพ...</p>}
+              {uploading && <p className="mt-3 text-sm text-sky-600 animate-pulse">กำลังอัปโหลดและบันทึกรูปภาพ...</p>}
             </div>
 
-            {/* แสดงข้อความแจ้งเตือน (Success / Error) */}
+            {/* แจ้งเตือนข้อความ */}
             {message.text && (
               <div className={`mb-6 rounded-2xl p-4 text-sm font-semibold ${
                 message.type === "success" ? "bg-green-50 text-green-700" : "bg-red-50 text-red-700"
@@ -299,7 +324,7 @@ export default function EditProfilePage() {
                   className="flex w-full items-center justify-center gap-2 rounded-2xl bg-sky-500 p-4 font-bold text-white shadow-md transition hover:bg-sky-600 disabled:opacity-50 sm:w-auto sm:px-10"
                 >
                   <FaSave size={18} />
-                  {saving ? "กำลังบันทึก..." : "บันทึกข้อมูล"}
+                  {saving ? "กำลังบันทึกและรีเฟรช..." : "บันทึกข้อมูล"}
                 </button>
               </div>
 
