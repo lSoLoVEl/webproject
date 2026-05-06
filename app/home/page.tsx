@@ -85,7 +85,8 @@ export default function HomePage() {
 
             // --- หมวด 3: จัดกลุ่มข้อมูลเรือและวันที่ ---
             // ถ้าดึงชื่อเรือมาได้ ใช้ชื่อเรือ ถ้าไม่ได้ให้ใช้ ID
-            const vCode = item.Vessel?.vessel_code || `เรือรหัส: ${item.vessel_id || "?"}`;
+            const vesselData = Array.isArray(item.Vessel) ? item.Vessel[0] : (item.Vessel as any);
+            const vCode = vesselData?.vessel_code || `เรือรหัส: ${item.vessel_id || "?"}`;
             const logKey = `${item.Date}_${vCode}`; // สร้าง Key เฉพาะสำหรับ วันที่+เรือ
 
             if (!logsMap[logKey]) {
